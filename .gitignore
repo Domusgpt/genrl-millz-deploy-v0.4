@@ -1,0 +1,17 @@
+node_modules/
+npm-debug.log*
+logs
+*.log
+/data/
+!.data/.gitkeep
+.env*
+!.env.example
+.DS_Store
+Thumbs.db
+dist/
+build/
+.idea
+.vscode
+*.swp
+*~
+.azure/
