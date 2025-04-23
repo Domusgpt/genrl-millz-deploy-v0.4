@@ -2,27 +2,22 @@
 
 set -e
 
-# Variables
-SUBSCRIPTION_ID="15c9bc5f-3900-4d84-ab5c-4ee08edda86f"
-LOCATION="eastus"
-RESOURCE_GROUP="rg-genrl-millz-deploy-v0.4-app"
-ACR_NAME="acrgenrlmillz"
-APP_SERVICE_PLAN="plan-genrl-millz-deploy-v0.4-app"
-WEB_APP_NAME="app-genrl-millz-v0-4"
-STORAGE_ACCOUNT="stgenrlmillzv04"
-FILE_SHARE_NAME="data-share"
+# Load configuration
+if [ -f "$(dirname "$0")/config.env" ]; then
+  source "$(dirname "$0")/config.env"
+fi
 
 # Login to Azure
 echo "Logging into Azure..."
-az login --username phillips.paul.email@gmail.com
+az login --username $AZURE_USERNAME
 
 # Set subscription
 echo "Setting subscription..."
-az account set --subscription $SUBSCRIPTION_ID
+az account set --subscription $AZURE_SUBSCRIPTION_ID
 
 # Create resource group
 echo "Creating resource group..."
-az group create --name $RESOURCE_GROUP --location $LOCATION
+az group create --name $RESOURCE_GROUP --location $AZURE_LOCATION
 
 # Create Azure Container Registry
 echo "Creating Azure Container Registry..."
@@ -36,7 +31,7 @@ ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --query "loginServer" -o tsv)
 
 # Create storage account
 echo "Creating storage account..."
-az storage account create --name $STORAGE_ACCOUNT --resource-group $RESOURCE_GROUP --location $LOCATION --sku Standard_LRS
+az storage account create --name $STORAGE_ACCOUNT --resource-group $RESOURCE_GROUP --location $AZURE_LOCATION --sku Standard_LRS
 
 # Get storage account key
 echo "Getting storage account key..."
@@ -48,7 +43,7 @@ az storage share create --name $FILE_SHARE_NAME --account-name $STORAGE_ACCOUNT 
 
 # Create App Service plan
 echo "Creating App Service plan..."
-az appservice plan create --name $APP_SERVICE_PLAN --resource-group $RESOURCE_GROUP --location $LOCATION --is-linux --sku B1
+az appservice plan create --name $APP_SERVICE_PLAN --resource-group $RESOURCE_GROUP --location $AZURE_LOCATION --is-linux --sku B1
 
 # Create Web App
 echo "Creating Web App..."
@@ -60,11 +55,28 @@ az webapp config container set --name $WEB_APP_NAME --resource-group $RESOURCE_G
 
 # Configure storage mount
 echo "Configuring storage mount..."
-az webapp config storage-account add --resource-group $RESOURCE_GROUP --name $WEB_APP_NAME --custom-id data-mount --storage-type AzureFiles --share-name $FILE_SHARE_NAME --account-name $STORAGE_ACCOUNT --mount-path /home/data --access-key $STORAGE_KEY
+az webapp config storage-account add --resource-group $RESOURCE_GROUP --name $WEB_APP_NAME --custom-id data-mount --storage-type AzureFiles --share-name $FILE_SHARE_NAME --account-name $STORAGE_ACCOUNT --mount-path $DATA_MOUNT_PATH --access-key $STORAGE_KEY
 
 # Get publish profile
 echo "Getting publish profile..."
 PUBLISH_PROFILE=$(az webapp deployment list-publishing-profiles --name $WEB_APP_NAME --resource-group $RESOURCE_GROUP --xml)
+
+# Create GitHub secrets if gh CLI is available
+if command -v gh &> /dev/null; then
+  echo "Setting up GitHub repository and secrets..."
+  
+  # Create the repository if it doesn't exist
+  gh repo create $GITHUB_REPO --public --source=. --push || echo "Repository already exists or could not be created"
+  
+  # Set GitHub secrets
+  gh secret set ACR_LOGIN_SERVER -b"$ACR_LOGIN_SERVER" -R $GITHUB_REPO
+  gh secret set ACR_USERNAME -b"$ACR_USERNAME" -R $GITHUB_REPO
+  gh secret set ACR_PASSWORD -b"$ACR_PASSWORD" -R $GITHUB_REPO
+  gh secret set AZURE_WEBAPP_NAME -b"$WEB_APP_NAME" -R $GITHUB_REPO
+  gh secret set AZURE_WEBAPP_PUBLISH_PROFILE -b"$PUBLISH_PROFILE" -R $GITHUB_REPO
+  
+  echo "GitHub repository and secrets set up successfully!"
+fi
 
 echo ""
 echo "==== DEPLOYMENT INFO ===="
@@ -84,6 +96,17 @@ echo "ACR_PASSWORD: $ACR_PASSWORD"
 echo "AZURE_WEBAPP_NAME: $WEB_APP_NAME"
 echo "AZURE_WEBAPP_PUBLISH_PROFILE: <copy the XML content from above>"
 echo ""
-echo "Add the publish profile content to your GitHub repository as a secret named AZURE_WEBAPP_PUBLISH_PROFILE."
-echo "The publish profile is too long to display here, but has been generated."
+
+# Save credentials to a local file for reference
+echo "Saving credentials to azure-credentials.txt..."
+cat > azure-credentials.txt << EOF
+ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER
+ACR_USERNAME=$ACR_USERNAME
+ACR_PASSWORD=$ACR_PASSWORD
+AZURE_WEBAPP_NAME=$WEB_APP_NAME
+STORAGE_ACCOUNT=$STORAGE_ACCOUNT
+STORAGE_KEY=$STORAGE_KEY
+EOF
+
+echo "Credentials saved to azure-credentials.txt"
 echo ""
